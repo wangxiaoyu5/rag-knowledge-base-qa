@@ -1,0 +1,113 @@
+# RAG 知识库问答系统配置文件
+
+# 系统配置
+system:
+  name: "RAG Knowledge Base QA System"
+  version: "1.0.0"
+  log_level: "INFO"
+
+# 文档处理配置
+document:
+  # 支持的文件扩展名
+  supported_extensions:
+    - ".pdf"
+    - ".docx"
+    - ".doc"
+    - ".txt"
+    - ".md"
+    - ".markdown"
+    - ".py"
+    - ".java"
+    - ".js"
+    - ".ts"
+    - ".html"
+    - ".css"
+    - ".json"
+    - ".xml"
+    - ".yaml"
+    - ".yml"
+  
+  # 文本分块配置
+  chunking:
+    chunk_size: 500
+    chunk_overlap: 50
+    strategy: "recursive"  # recursive, character, token
+    separators:
+      - "\n\n"
+      - "\n"
+      - "。"
+      - "！"
+      - "？"
+      - "；"
+      - " "
+      - ""
+
+# Embedding 配置
+embedding:
+  model_name: "BAAI/bge-large-zh"
+  device: "cpu"  # cpu, cuda, cuda:0
+  normalize_embeddings: true
+  batch_size: 32
+
+# 向量数据库配置
+vector_store:
+  type: "faiss"  # faiss, chroma, milvus
+  persist_directory: "./data/vector_db"
+  
+  # FAISS 特定配置
+  faiss:
+    index_type: "IndexFlatIP"  # IndexFlatIP, IndexIVFFlat
+  
+  # Chroma 特定配置
+  chroma:
+    collection_name: "rag_documents"
+
+# 检索配置
+retrieval:
+  # 混合检索权重
+  hybrid:
+    enabled: true
+    vector_weight: 0.7
+    bm25_weight: 0.3
+  
+  # 重排序配置
+  rerank:
+    enabled: true
+    model_name: "BAAI/bge-reranker-large"
+    device: "cpu"
+    max_length: 512
+  
+  # 检索参数
+  top_k:
+    retrieve: 10
+    rerank: 5
+
+# LLM 配置
+llm:
+  provider: "openai"  # openai, azure
+  model: "gpt-3.5-turbo"
+  temperature: 0.7
+  max_tokens: 1000
+  top_p: 1.0
+  frequency_penalty: 0.0
+  presence_penalty: 0.0
+
+# 问答生成配置
+qa_generation:
+  max_context_length: 4000
+  use_citation: true
+  confidence_threshold: 0.5
+
+# Web 界面配置
+web:
+  host: "0.0.0.0"
+  port: 8501
+  title: "RAG 知识库问答系统"
+  debug: false
+
+# 数据目录配置
+paths:
+  data_dir: "./data/documents"
+  vector_db_dir: "./data/vector_db"
+  logs_dir: "./logs"
+  models_dir: "./models"

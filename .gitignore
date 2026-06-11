@@ -1,0 +1,8 @@
+models/
+*.bin
+*.safetensors
+*.onnx
+data/vector_db*/
+__pycache__/
+*.pyc
+.env

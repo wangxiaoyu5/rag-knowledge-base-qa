@@ -1,0 +1,1 @@
+LOCAL_MODEL_PATH=models\sentence-transformers\paraphrase-MiniLM-L3-v2

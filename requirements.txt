@@ -1,0 +1,37 @@
+# RAG 知识库问答系统依赖
+
+# 核心框架
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-openai>=0.0.5
+
+# 向量数据库
+faiss-cpu>=1.7.4
+chromadb>=0.4.18
+
+# Embedding 模型
+sentence-transformers>=2.2.2
+transformers>=4.36.0
+torch>=2.1.0
+
+# 文档处理
+pypdf>=3.17.0
+python-docx>=0.8.11
+unstructured>=0.11.0
+
+# Web 界面
+streamlit>=1.28.0
+
+# 工具库
+numpy>=1.24.0
+pandas>=2.0.0
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+
+# 可选：用于 BM25
+rank-bm25>=0.2.2
+
+# 开发工具
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
