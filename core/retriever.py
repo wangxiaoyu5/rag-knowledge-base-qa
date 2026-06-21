@@ -246,10 +246,8 @@ class Reranker:
         """懒加载模型"""
         if self._model is None:
             import os
-            # 设置 HuggingFace 镜像源
             os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
             
-            # 先检查是否有本地模型可用
             local_path = self._get_local_model_path(self.model_name)
             
             if local_path:
@@ -265,7 +263,6 @@ class Reranker:
                 except Exception as e:
                     logger.warning(f"加载本地重排序模型失败: {e}")
             
-            # 尝试从 HuggingFace 下载
             logger.info(f"正在下载重排序模型: {self.model_name}")
             try:
                 from sentence_transformers import CrossEncoder
@@ -278,6 +275,7 @@ class Reranker:
                 logger.error(f"下载重排序模型失败: {e}")
                 logger.warning("将使用无重排序模式（按向量相似度排序）")
                 self._use_fallback = True
+                self._model = None
                 
         return self._model
     
@@ -398,24 +396,37 @@ class AdvancedRetriever:
         """
         logger.info(f"开始检索: {query}")
         
-        # 第一阶段：检索
-        if self.hybrid_retriever:
-            initial_results = self.hybrid_retriever.retrieve(query)
-        else:
-            # 仅使用向量检索
-            docs = self.vector_store_manager.similarity_search(query, k=self.top_k * 2)
-            initial_results = [
-                RetrievalResult(doc, 1.0, i + 1, "vector")
-                for i, doc in enumerate(docs)
-            ]
-        
-        logger.info(f"初始检索返回 {len(initial_results)} 个结果")
-        
-        # 第二阶段：重排序
-        if self.reranker and initial_results:
-            documents = [r.document for r in initial_results]
-            final_results = self.reranker.rerank(query, documents, top_k=self.top_k)
-            logger.info(f"重排序后返回 {len(final_results)} 个结果")
-            return final_results
-        else:
-            return initial_results[:self.top_k]
+        try:
+            if self.hybrid_retriever:
+                initial_results = self.hybrid_retriever.retrieve(query)
+            else:
+                docs = self.vector_store_manager.similarity_search(query, k=self.top_k * 2)
+                initial_results = [
+                    RetrievalResult(doc, 1.0, i + 1, "vector")
+                    for i, doc in enumerate(docs)
+                ]
+            
+            logger.info(f"初始检索返回 {len(initial_results)} 个结果")
+            
+            if self.reranker and initial_results:
+                try:
+                    documents = [r.document for r in initial_results]
+                    final_results = self.reranker.rerank(query, documents, top_k=self.top_k)
+                    logger.info(f"重排序后返回 {len(final_results)} 个结果")
+                    return final_results
+                except Exception as e:
+                    logger.warning(f"重排序失败，使用原始检索结果: {e}")
+                    return initial_results[:self.top_k]
+            else:
+                return initial_results[:self.top_k]
+        except Exception as e:
+            logger.error(f"检索过程发生错误: {e}")
+            try:
+                docs = self.vector_store_manager.similarity_search(query, k=self.top_k)
+                return [
+                    RetrievalResult(doc, 1.0, i + 1, "vector")
+                    for i, doc in enumerate(docs)
+                ]
+            except Exception as fallback_e:
+                logger.error(f"回退检索也失败: {fallback_e}")
+                return []

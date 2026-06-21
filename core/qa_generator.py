@@ -86,7 +86,8 @@ class QAGenerator:
         model_name: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
         max_tokens: int = 1000,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        api_base: Optional[str] = None
     ):
         """
         初始化问答生成器
@@ -97,12 +98,14 @@ class QAGenerator:
             temperature: 生成温度
             max_tokens: 最大生成token数
             api_key: API密钥
+            api_base: API基础URL（可选，用于自定义API端点）
         """
         self.model_type = model_type
         self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.api_key = api_key
+        self.api_base = api_base
         
         # 初始化上下文压缩器
         self.context_compressor = ContextCompressor()
@@ -115,12 +118,52 @@ class QAGenerator:
         if self._model is None:
             if self.model_type == "openai":
                 from langchain_openai import ChatOpenAI
-                self._model = ChatOpenAI(
-                    model_name=self.model_name,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    api_key=self.api_key
-                )
+                
+                chat_params = {
+                    "model_name": self.model_name,
+                    "temperature": self.temperature,
+                    "max_tokens": self.max_tokens,
+                    "api_key": self.api_key
+                }
+                
+                if self.api_base:
+                    chat_params["base_url"] = self.api_base
+                
+                self._model = ChatOpenAI(**chat_params)
+            elif self.model_type == "local":
+                from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+                
+                try:
+                    tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                    
+                    model_args = {
+                        "trust_remote_code": True
+                    }
+                    
+                    try:
+                        model = AutoModelForCausalLM.from_pretrained(
+                            self.model_name,
+                            **model_args
+                        )
+                    except Exception as e:
+                        logger.warning(f"加载模型失败: {e}")
+                        logger.warning("尝试使用低内存模式加载")
+                        model_args["low_cpu_mem_usage"] = True
+                        model = AutoModelForCausalLM.from_pretrained(
+                            self.model_name,
+                            **model_args
+                        )
+                    
+                    self._model = {
+                        "type": "huggingface_pipeline",
+                        "tokenizer": tokenizer,
+                        "model": model,
+                        "max_new_tokens": self.max_tokens,
+                        "temperature": self.temperature
+                    }
+                except Exception as e:
+                    logger.error(f"加载本地模型失败: {str(e)}")
+                    raise
             else:
                 raise ValueError(f"不支持的模型类型: {self.model_type}")
             
@@ -188,15 +231,33 @@ class QAGenerator:
             model = self._load_model()
             
             # 生成答案
-            if stream:
-                # 流式生成
-                answer = ""
-                for chunk in model.stream(prompt):
-                    answer += chunk.content
+            if isinstance(model, dict) and model.get("type") == "huggingface_pipeline":
+                # 本地模型处理
+                from transformers import pipeline
+                
+                pipe = pipeline(
+                    "text-generation",
+                    model=model["model"],
+                    tokenizer=model["tokenizer"],
+                    max_new_tokens=model["max_new_tokens"],
+                    temperature=model["temperature"],
+                    top_p=0.95,
+                    repetition_penalty=1.15
+                )
+                
+                response = pipe(prompt)
+                answer = response[0]["generated_text"].replace(prompt, "").strip()
             else:
-                # 非流式生成
-                response = model.invoke(prompt)
-                answer = response.content
+                # LangChain 模型处理
+                if stream:
+                    # 流式生成
+                    answer = ""
+                    for chunk in model.stream(prompt):
+                        answer += chunk.content
+                else:
+                    # 非流式生成
+                    response = model.invoke(prompt)
+                    answer = response.content
             
             # 计算置信度（简化版本）
             confidence = self._calculate_confidence(documents, query, answer)

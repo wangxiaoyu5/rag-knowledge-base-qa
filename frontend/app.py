@@ -107,11 +107,7 @@ def get_confidence_color(confidence: float) -> str:
 def display_chat_message(role: str, content: str, sources=None, confidence=None):
     """显示聊天消息"""
     if role == "user":
-        st.markdown(f'''
-        <div class="chat-message user-message">
-            <strong>👤 用户:</strong><br>{content}
-        </div>
-        ''', unsafe_allow_html=True)
+        st.markdown(f'<div class="chat-message user-message"><strong>👤 用户:</strong><br>{content}</div>', unsafe_allow_html=True)
     else:
         confidence_html = ""
         if confidence is not None:
@@ -121,21 +117,23 @@ def display_chat_message(role: str, content: str, sources=None, confidence=None)
         sources_html = ""
         if sources:
             sources_html = '<div style="margin-top: 10px;"><strong>📚 参考来源:</strong></div>'
-            for source in sources:
-                sources_html += f'''
-                <div class="source-box">
-                    <strong>来源 {source['index']}:</strong> {source['metadata'].get('file_name', '未知文件')}<br>
-                    <small>{source['content'][:150]}...</small>
-                </div>
-                '''
+            for i, source in enumerate(sources):
+                # 处理 Document 对象或字典
+                if hasattr(source, 'page_content'):
+                    # Document 对象
+                    file_name = source.metadata.get('file_name', source.metadata.get('source', '未知文件'))
+                    source_content = source.page_content
+                elif isinstance(source, dict):
+                    # 字典格式
+                    file_name = source.get('metadata', {}).get('file_name', '未知文件')
+                    source_content = source.get('content', '')
+                else:
+                    file_name = '未知文件'
+                    source_content = str(source)
+                
+                sources_html += f'<div class="source-box"><strong>来源 {i + 1}:</strong> {file_name}<br><small>{source_content[:150]}...</small></div>'
         
-        st.markdown(f'''
-        <div class="chat-message assistant-message">
-            <strong>🤖 助手:</strong> {confidence_html}<br><br>
-            {content}
-            {sources_html}
-        </div>
-        ''', unsafe_allow_html=True)
+        st.markdown(f'<div class="chat-message assistant-message"><strong>🤖 助手:</strong> {confidence_html}<br><br>{content}{sources_html}</div>', unsafe_allow_html=True)
 
 
 def build_knowledge_base(
@@ -190,7 +188,8 @@ def build_knowledge_base(
         
         # 4. 创建向量数据库
         progress_bar.progress(80, "💾 创建向量数据库...")
-        vector_db_path = os.path.join(project_root, "data", "vector_db")
+        # 使用相对路径，避免 FAISS 的 Unicode 路径问题
+        vector_db_path = "./data/vector_db"
         vector_store_manager = VectorStoreManager(
             embedding_manager=embedding_manager,
             vector_store_type="faiss",
@@ -207,8 +206,7 @@ def build_knowledge_base(
             documents=split_documents,
             use_hybrid=use_hybrid,
             use_rerank=use_rerank,
-            top_k_retrieve=10,
-            top_k_rerank=5
+            top_k=5
         )
         
         # 保存到会话状态
@@ -259,7 +257,8 @@ def main():
         
         embedding_model = st.selectbox(
             "Embedding 模型",
-            ["sentence-transformers/paraphrase-MiniLM-L3-v2 (本地模型 - 已下载)", "text-embedding-ada-002 (OpenAI API)", "BAAI/bge-large-zh", "BAAI/bge-base-zh", "moka-ai/m3e-base"],
+            ["BAAI/bge-large-zh (本地模型 - 已下载)", "sentence-transformers/paraphrase-MiniLM-L3-v2", "text-embedding-ada-002 (OpenAI API)", "BAAI/bge-base-zh", "moka-ai/m3e-base"],
+            index=0,
             help="选择文本向量化的模型（推荐使用本地模型，无需联网）"
         )
         
@@ -286,26 +285,50 @@ def main():
         
         # 构建知识库按钮
         if st.button("🔨 构建知识库", type="primary", use_container_width=True):
-            if not api_key:
-                st.error("请先输入 OpenAI API Key")
+            use_openai_embedding = "openai" in embedding_model.lower() or "text-embedding-ada" in embedding_model.lower()
+            
+            # 检查 API Key（仅当使用 OpenAI Embedding 或 QA 生成时需要）
+            if use_openai_embedding and not api_key:
+                st.error("使用 OpenAI Embedding 需要输入 API Key")
             elif not os.path.exists(data_dir):
                 st.error(f"数据目录不存在: {data_dir}")
             else:
                 progress_bar = st.progress(0)
-                success, message = build_knowledge_base(
-                    data_dir, embedding_model, chunk_size, chunk_overlap,
-                    use_hybrid, use_rerank, progress_bar
-                )
-                
-                if success:
-                    st.success(message)
-                    # 初始化 QA 生成器
-                    st.session_state.qa_generator = QAGenerator(
-                        api_key=api_key,
-                        api_base=api_base if api_base else None
+                try:
+                    success, message = build_knowledge_base(
+                        data_dir, embedding_model, chunk_size, chunk_overlap,
+                        use_hybrid, use_rerank, progress_bar
                     )
-                else:
-                    st.error(message)
+                    
+                    if success:
+                        st.success(message)
+                        # 初始化 QA 生成器
+                        if api_key:
+                            st.session_state.qa_generator = QAGenerator(
+                                api_key=api_key,
+                                api_base=api_base if api_base else None
+                            )
+                        else:
+                            # 尝试使用本地模型，失败则使用简单检索模式
+                            try:
+                                qa_gen = QAGenerator(
+                                    model_type="local",
+                                    model_name="Qwen/Qwen2-0.5B-Instruct"
+                                )
+                                # 立即测试模型是否能加载
+                                qa_gen._load_model()
+                                st.session_state.qa_generator = qa_gen
+                                st.info("使用本地模型进行问答")
+                            except Exception as e:
+                                st.session_state.qa_generator = None
+                                st.session_state.use_simple_qa = True
+                                st.info("使用简单检索模式（无需 API Key）")
+                    else:
+                        st.error(message)
+                except Exception as e:
+                    st.error(f"构建知识库时发生意外错误: {str(e)}")
+                    import traceback
+                    st.error(f"详细错误信息:\n{traceback.format_exc()}")
         
         # 显示状态
         st.divider()
@@ -333,20 +356,83 @@ def main():
     
     # 输入框
     if st.session_state.is_initialized:
+        import re
+
+        def simple_qa_extract(question, documents):
+            answer_parts = []
+            seen = set()
+            
+            for doc in documents:
+                content = doc.page_content
+                file_name = doc.metadata.get('file_name', '未知文件')
+                
+                if "毕业时间" in question or "毕业日期" in question:
+                    match = re.search(r'毕业时间[\uff1a:]?\s*(\d{4}\.\d{2})', content)
+                    if match and match.group(1) not in seen:
+                        answer_parts.append(f"毕业时间：{match.group(1)}")
+                        seen.add(match.group(1))
+                
+                if "教育背景" in question or "学历" in question:
+                    match = re.search(r'学历[\uff1a:]?\s*([\u4e00-\u9fa5]+)', content)
+                    if match and match.group(1) not in seen:
+                        answer_parts.append(f"学历：{match.group(1)}")
+                        seen.add(match.group(1))
+                    
+                    match = re.search(r'毕业院校[\uff1a:]?\s*([\u4e00-\u9fa5]+)', content)
+                    if match and match.group(1) not in seen:
+                        answer_parts.append(f"毕业院校：{match.group(1)}")
+                        seen.add(match.group(1))
+                
+                if "专业" in question:
+                        match = re.search(r'专\s*业[\uff1a:]?\s*([\u4e00-\u9fa5]+(?:与[\u4e00-\u9fa5]+)*)', content)
+                        if match and match.group(1) not in seen:
+                            answer_parts.append(f"专业：{match.group(1)}")
+                            seen.add(match.group(1))
+                
+                if "姓名" in question or "名字" in question:
+                    match = re.search(r'姓名[\uff1a:]?\s*([\u4e00-\u9fa5]+)', content)
+                    if match and match.group(1) not in seen:
+                        answer_parts.append(f"姓名：{match.group(1)}")
+                        seen.add(match.group(1))
+                
+                if "邮箱" in question or "email" in question:
+                    match = re.search(r'邮箱[\uff1a:]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', content)
+                    if match and match.group(1) not in seen:
+                        answer_parts.append(f"邮箱：{match.group(1)}")
+                        seen.add(match.group(1))
+                
+                if "电话" in question or "手机" in question:
+                    match = re.search(r'手机号码[\uff1a:]?\s*(\d{11})', content)
+                    if match and match.group(1) not in seen:
+                        answer_parts.append(f"手机号码：{match.group(1)}")
+                        seen.add(match.group(1))
+            
+            if answer_parts:
+                return "；".join(answer_parts)
+            else:
+                result = "从文档中找到以下相关信息：\n\n"
+                for i, doc in enumerate(documents[:3], 1):
+                    result += f"📄 来源 {i}: {doc.metadata.get('file_name', '未知文件')}\n"
+                    result += f"内容: {doc.page_content[:200]}...\n\n"
+                return result
+
+        qa_available = st.session_state.get('qa_generator') is not None or st.session_state.get('use_simple_qa')
+        
         with st.container():
             col1, col2 = st.columns([6, 1])
             with col1:
                 user_input = st.text_input(
                     "输入你的问题",
                     key="user_input",
-                    placeholder="例如：什么是 RAG 技术？"
+                    placeholder="例如：王晓宇的毕业时间是什么？",
+                    disabled=not qa_available
                 )
             with col2:
                 st.write("")  # 占位
                 st.write("")
-                send_button = st.button("发送", use_container_width=True)
+                send_button = st.button("发送", use_container_width=True, disabled=not qa_available)
         
-        if send_button and user_input:
+        if send_button and user_input and qa_available:
             # 添加用户消息到历史
             st.session_state.chat_history.append({
                 "role": "user",
@@ -364,10 +450,53 @@ def main():
                     retrieval_results = st.session_state.advanced_retriever.retrieve(user_input)
                     documents = [r.document for r in retrieval_results]
                     
-                    # 2. 生成答案
-                    response = st.session_state.qa_generator.generate_answer(
-                        user_input, documents
-                    )
+                    # 2. 生成答案（根据模式选择）
+                    use_simple = st.session_state.get('use_simple_qa') or st.session_state.get('qa_generator') is None
+                    
+                    if use_simple:
+                        answer = simple_qa_extract(user_input, documents)
+                        response = type('obj', (object,), {
+                            'answer': answer,
+                            'sources': documents,
+                            'confidence': 0.8
+                        })
+                    else:
+                        try:
+                            response = st.session_state.qa_generator.generate(
+                                user_input, documents
+                            )
+                            # 检查回答是否为空
+                            if not response.answer or not response.answer.strip():
+                                st.warning("模型生成内容为空，使用简单检索模式")
+                                answer = simple_qa_extract(user_input, documents)
+                                response = type('obj', (object,), {
+                                    'answer': answer,
+                                    'sources': documents,
+                                    'confidence': 0.8
+                                })
+                        except Exception as e:
+                            error_str = str(e)
+                            if (
+                                "Can't load the model" in error_str or 
+                                "pytorch_model.bin" in error_str or
+                                "WinError 10060" in error_str or
+                                "Connection refused" in error_str or
+                                "connection attempt failed" in error_str or
+                                "download" in error_str.lower() or
+                                "huggingface" in error_str.lower()
+                            ):
+                                st.session_state.use_simple_qa = True
+                                st.session_state.qa_generator = None
+                                st.warning("模型加载失败（网络或文件问题），已切换到简单检索模式")
+                                
+                                answer = simple_qa_extract(user_input, documents)
+                                response = type('obj', (object,), {
+                                    'answer': answer,
+                                    'sources': documents,
+                                    'confidence': 0.8
+                                })
+                            else:
+                                raise
                     
                     # 3. 添加到历史
                     st.session_state.chat_history.append({
@@ -388,17 +517,46 @@ def main():
                     
                 except Exception as e:
                     error_message = f"生成回答时出错: {str(e)}"
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": error_message,
-                        "sources": [],
-                        "confidence": 0.0
-                    })
-                    with chat_container:
-                        display_chat_message("assistant", error_message)
+                    
+                    if "unsupported_country_region_territory" in str(e) or "403" in str(e):
+                        st.session_state.use_simple_qa = True
+                        st.session_state.qa_generator = None
+                        st.warning("检测到 API 访问受限，已自动切换到简单检索模式")
+                        
+                        answer = simple_qa_extract(user_input, documents)
+                        response = type('obj', (object,), {
+                            'answer': answer,
+                            'sources': documents,
+                            'confidence': 0.8
+                        })
+                        
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": response.answer,
+                            "sources": response.sources,
+                            "confidence": response.confidence
+                        })
+                        with chat_container:
+                            display_chat_message(
+                                "assistant",
+                                response.answer,
+                                response.sources,
+                                response.confidence
+                            )
+                    else:
+                        st.session_state.chat_history.append({
+                            "role": "assistant",
+                            "content": error_message,
+                            "sources": [],
+                            "confidence": 0.0
+                        })
+                        with chat_container:
+                            display_chat_message("assistant", error_message)
             
             # 清空输入框
             st.rerun()
+        elif not qa_available:
+            st.warning("⚠️ 请在左侧配置 OpenAI API Key 以启用问答功能")
     else:
         st.info("👈 请在左侧配置系统并构建知识库")
         

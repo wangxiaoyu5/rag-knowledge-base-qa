@@ -46,31 +46,28 @@ class EmbeddingManager:
         """获取本地模型路径"""
         project_root = Path(__file__).parent.parent
         
-        # 检查 model_config.txt
-        config_file = project_root / "model_config.txt"
-        if config_file.exists():
-            with open(config_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    if line.startswith('LOCAL_MODEL_PATH='):
-                        path_str = line.strip().split('=', 1)[1]
-                        # 转换为绝对路径
-                        local_path = project_root / path_str
-                        if local_path.exists() and local_path.is_dir():
-                            return str(local_path)
-        
         # 检查默认模型目录
         models_dir = project_root / "models"
         
         # 尝试不同的路径格式
         possible_paths = [
             models_dir / model_name.replace('/', os.sep),
+            models_dir / model_name.split('/')[1] if '/' in model_name else models_dir / model_name,
             models_dir / "hub" / model_name.replace('/', os.sep),
             models_dir / "._____temp" / model_name.replace('/', os.sep),
         ]
         
         for path in possible_paths:
             if path.exists() and path.is_dir():
-                return str(path)
+                # 检查是否包含模型文件
+                if (path / "config.json").exists() or (path / "pytorch_model.bin").exists():
+                    return str(path)
+                # 尝试更深一层的路径（如 models/bge-large-zh/BAAI/bge-large-zh）
+                org_name = model_name.split('/')[0] if '/' in model_name else model_name
+                deeper_path = path / org_name / model_name.split('/')[1] if '/' in model_name else path / model_name
+                if deeper_path.exists() and deeper_path.is_dir():
+                    if (deeper_path / "config.json").exists() or (deeper_path / "pytorch_model.bin").exists():
+                        return str(deeper_path)
         
         return None
     
@@ -234,7 +231,52 @@ class VectorStoreManager:
         # 设置 HuggingFace 镜像源
         os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
         
+        # 确定保存路径
+        actual_save_path = save_path if save_path else self.persist_directory
+        
+        # 检查路径是否包含非ASCII字符，如果是则使用相对路径
+        # 由于 FAISS 不支持 Unicode 路径，总是尝试使用相对路径
+        original_path = actual_save_path
+        project_root = Path(__file__).parent.parent
+        logger.info(f"原始路径: {actual_save_path}")
+        logger.info(f"项目根目录: {project_root}")
+        
+        try:
+            # 先转换为绝对路径，然后获取相对路径
+            abs_path = Path(actual_save_path).resolve()
+            logger.info(f"绝对路径: {abs_path}")
+            relative_path = abs_path.relative_to(project_root)
+            actual_save_path = str(relative_path)
+            logger.info(f"使用相对路径: {actual_save_path}")
+        except ValueError as e:
+            # 如果无法转换为相对路径，保留原路径
+            actual_save_path = str(Path(actual_save_path).resolve())
+            logger.info(f"使用绝对路径: {actual_save_path}，原因: {str(e)}")
+        
+        logger.info(f"向量数据库保存路径（标准化后）: {actual_save_path}")
+        
+        # 确保保存目录存在（在创建向量数据库之前）
+        save_dir = Path(actual_save_path)
+        if not save_dir.exists():
+            save_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"创建保存目录: {actual_save_path}")
+        
+        # 检查目录是否可写
+        if not os.access(str(save_dir), os.W_OK):
+            raise PermissionError(f"无法写入目录: {actual_save_path}")
+        
+        # 测试文件写入
+        test_file = save_dir / "test_write.tmp"
+        try:
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+            logger.info(f"目录写入测试成功: {actual_save_path}")
+        except Exception as e:
+            raise RuntimeError(f"目录写入测试失败: {str(e)}")
+        
         if self.vector_store_type == "faiss":
+            import faiss
             from langchain_community.vectorstores import FAISS
             
             if self.embedding_manager.use_openai:
@@ -271,9 +313,28 @@ class VectorStoreManager:
             vector_store = FAISS.from_documents(documents, embeddings)
             
             # 保存到本地
-            if save_path:
-                vector_store.save_local(save_path)
-                logger.info(f"向量数据库已保存到: {save_path}")
+            # 直接使用 FAISS API 保存索引，避免 langchain 的路径转换问题
+            # 确保使用相对路径以避免 FAISS 的 Unicode 路径问题
+            save_dir = Path(actual_save_path)
+            if not save_dir.exists():
+                save_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 使用字符串操作构建相对路径，避免 Path 对象的绝对路径转换
+            faiss_index_path_rel = actual_save_path + os.sep + "index.faiss"
+            faiss.write_index(vector_store.index, faiss_index_path_rel)
+            logger.info(f"FAISS 索引已保存到: {faiss_index_path_rel}")
+            
+            # 保存 docstore
+            import pickle
+            docstore_path = save_dir / "index.pkl"
+            with open(docstore_path, 'wb') as f:
+                pickle.dump({
+                    'docstore': vector_store.docstore,
+                    'index_to_docstore_id': vector_store.index_to_docstore_id
+                }, f)
+            logger.info(f"文档存储已保存到: {docstore_path}")
+            
+            logger.info(f"向量数据库已保存到: {actual_save_path}")
             
             self._vector_store = vector_store
             return vector_store
