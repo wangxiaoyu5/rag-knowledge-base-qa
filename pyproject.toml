@@ -1,0 +1,124 @@
+[project]
+name = "rag-resume-qa"
+version = "1.0.0"
+description = "基于 RAG 的简历知识库问答系统（LangChain + FAISS + Streamlit）"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "RAG Project" },
+]
+license = { text = "MIT" }
+dependencies = [
+    "streamlit>=1.28.0",
+    "langchain>=0.2.0",
+    "langchain-community>=0.2.0",
+    "langchain-core>=0.2.0",
+    "sentence-transformers>=2.2.0",
+    "faiss-cpu>=1.7.4",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pypdf>=4.0.0",
+    "python-docx>=1.0.0",
+    "PyYAML>=6.0",
+    "beautifulsoup4>=4.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4.0",
+    "black>=24.0",
+    "mypy>=1.0.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "pre-commit>=3.6.0",
+]
+
+# ==================== Ruff 配置（Lint + 格式，替代 Flake8/isort） ====================
+[tool.ruff]
+# 与现有代码兼容的行宽
+line-length = 120
+
+# 排除目录
+exclude = [
+    ".venv",
+    "venv",
+    "__pycache__",
+    "models",
+    "data/vector_db*",
+    ".trae",
+    "projects",
+    "*.egg-info",
+    ".mypy_cache",
+    ".ruff_cache",
+]
+
+[tool.ruff.lint]
+# 启用规则（按功能分组）
+select = [
+    "E",   # pycodestyle 错误
+    "W",   # pycodestyle 警告
+    "F",   # pyflakes 未定义名称
+    "I",   # isort 导入排序
+    "N",   # pep8-naming 命名规范
+    "UP",  # pyupgrade Python 语法升级
+    "B",   # flake8-bugbear 常见 bug
+]
+
+# 忽略的特定规则（放宽非关键风格，优先让规则服务于开发而不是阻碍）
+ignore = [
+    "E501",   # 行长度由 ruff format 统一处理
+    "E402",   # 允许 import 前有 os.environ 设置（HF mirror 必须在 transformers 之前）
+    "B008",   # 允许 dataclass 函数调用作为默认值
+    "UP006",  # 允许使用 text=True 而非 encoding（Windows 兼容）
+    "UP007",  # 允许使用 .env 中的 str 值
+    "B904",   # 暂不强求 raise from（后续迭代再优化）
+    "B905",   # 暂不强求 zip strict=
+    "F841",   # 允许未使用变量（调试时常见）
+    "UP035",  # 暂允许 typing.List/Dict（LangChain 类型注解风格）
+    "W293",   # 行尾空格（非关键）
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "frontend"]
+extra-standard-library = ["typing", "dataclasses", "logging", "pathlib", "re", "json", "glob"]
+
+# ==================== Black 配置（格式化） ====================
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+skip-string-normalization = false
+
+# ==================== mypy 配置（类型检查） ====================
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true  # LangChain / Streamlit 部分类型不完整
+
+# 排除目录
+[[tool.mypy.overrides]]
+module = [
+    "streamlit.*",
+    "langchain.*",
+    "faiss.*",
+    "sentence_transformers.*",
+]
+ignore_missing_imports = true
+
+# ==================== Pytest 配置 ====================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+# ==================== Pre-commit Hooks ====================
+# 运行：pip install pre-commit && pre-commit install
+repos = [
+  { repo = "https://github.com/astral-sh/ruff-pre-commit", rev = "v0.4.0", hooks = [
+      { id = "ruff", args = ["check", "--fix"] },
+      { id = "ruff-format" },
+  ]},
+]

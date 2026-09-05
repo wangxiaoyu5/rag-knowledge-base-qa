@@ -1,12 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 Embedding 模块 - 文本向量化和向量数据库管理
 """
-from typing import List, Optional, Dict, Any
-from pathlib import Path
 import logging
-import pickle
 import os
+from pathlib import Path
+from typing import Any, Dict, List
 
 from langchain_core.documents import Document
 
@@ -15,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingManager:
     """Embedding 管理器"""
-    
+
     def __init__(
         self,
         model_name: str = "BAAI/bge-large-zh",
         device: str = "cpu",
         normalize_embeddings: bool = True,
         use_openai: bool = False,
-        openai_api_key: Optional[str] = None
+        openai_api_key: str | None = None
     ):
         """
         初始化 Embedding 管理器
@@ -41,14 +39,14 @@ class EmbeddingManager:
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self._model = None
         self._openai_client = None
-    
-    def _get_local_model_path(self, model_name: str) -> Optional[str]:
+
+    def _get_local_model_path(self, model_name: str) -> str | None:
         """获取本地模型路径"""
         project_root = Path(__file__).parent.parent
-        
+
         # 检查默认模型目录
         models_dir = project_root / "models"
-        
+
         # 尝试不同的路径格式
         possible_paths = [
             models_dir / model_name.replace('/', os.sep),
@@ -56,7 +54,7 @@ class EmbeddingManager:
             models_dir / "hub" / model_name.replace('/', os.sep),
             models_dir / "._____temp" / model_name.replace('/', os.sep),
         ]
-        
+
         for path in possible_paths:
             if path.exists() and path.is_dir():
                 # 检查是否包含模型文件
@@ -68,9 +66,9 @@ class EmbeddingManager:
                 if deeper_path.exists() and deeper_path.is_dir():
                     if (deeper_path / "config.json").exists() or (deeper_path / "pytorch_model.bin").exists():
                         return str(deeper_path)
-        
+
         return None
-    
+
     def _load_model(self):
         """懒加载模型"""
         if self._model is None:
@@ -85,7 +83,7 @@ class EmbeddingManager:
             else:
                 # 先检查是否有本地模型
                 local_path = self._get_local_model_path(self.model_name)
-                
+
                 if local_path:
                     logger.info(f"使用本地模型: {local_path}")
                     try:
@@ -103,7 +101,7 @@ class EmbeddingManager:
                     logger.info(f"正在下载 Embedding 模型: {self.model_name}")
                     # 设置 HuggingFace 镜像源
                     os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-                    
+
                     try:
                         from sentence_transformers import SentenceTransformer
                         self._model = SentenceTransformer(
@@ -124,7 +122,7 @@ class EmbeddingManager:
                             logger.error(f"OpenAI API 也失败: {e2}")
                             raise e
         return self._model
-    
+
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """
         将文档编码为向量
@@ -156,7 +154,7 @@ class EmbeddingManager:
                 show_progress_bar=True
             )
             return embeddings.tolist()
-    
+
     def embed_query(self, text: str) -> List[float]:
         """
         将查询编码为向量
@@ -191,12 +189,12 @@ class EmbeddingManager:
 
 class VectorStoreManager:
     """向量数据库管理器"""
-    
+
     def __init__(
         self,
         embedding_manager: EmbeddingManager,
         vector_store_type: str = "faiss",
-        persist_directory: Optional[str] = None
+        persist_directory: str | None = None
     ):
         """
         初始化向量数据库管理器
@@ -210,11 +208,11 @@ class VectorStoreManager:
         self.vector_store_type = vector_store_type.lower()
         self.persist_directory = persist_directory or "./data/vector_db"
         self._vector_store = None
-    
+
     def create_vector_store(
         self,
         documents: List[Document],
-        save_path: Optional[str] = None
+        save_path: str | None = None
     ) -> Any:
         """
         从文档创建向量数据库
@@ -227,20 +225,20 @@ class VectorStoreManager:
             向量数据库实例
         """
         logger.info(f"正在创建向量数据库，文档数: {len(documents)}")
-        
+
         # 设置 HuggingFace 镜像源
         os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-        
+
         # 确定保存路径
         actual_save_path = save_path if save_path else self.persist_directory
-        
+
         # 检查路径是否包含非ASCII字符，如果是则使用相对路径
         # 由于 FAISS 不支持 Unicode 路径，总是尝试使用相对路径
         original_path = actual_save_path
         project_root = Path(__file__).parent.parent
         logger.info(f"原始路径: {actual_save_path}")
         logger.info(f"项目根目录: {project_root}")
-        
+
         try:
             # 先转换为绝对路径，然后获取相对路径
             abs_path = Path(actual_save_path).resolve()
@@ -252,19 +250,19 @@ class VectorStoreManager:
             # 如果无法转换为相对路径，保留原路径
             actual_save_path = str(Path(actual_save_path).resolve())
             logger.info(f"使用绝对路径: {actual_save_path}，原因: {str(e)}")
-        
+
         logger.info(f"向量数据库保存路径（标准化后）: {actual_save_path}")
-        
+
         # 确保保存目录存在（在创建向量数据库之前）
         save_dir = Path(actual_save_path)
         if not save_dir.exists():
             save_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"创建保存目录: {actual_save_path}")
-        
+
         # 检查目录是否可写
         if not os.access(str(save_dir), os.W_OK):
             raise PermissionError(f"无法写入目录: {actual_save_path}")
-        
+
         # 测试文件写入
         test_file = save_dir / "test_write.tmp"
         try:
@@ -274,11 +272,10 @@ class VectorStoreManager:
             logger.info(f"目录写入测试成功: {actual_save_path}")
         except Exception as e:
             raise RuntimeError(f"目录写入测试失败: {str(e)}")
-        
+
         if self.vector_store_type == "faiss":
-            import faiss
             from langchain_community.vectorstores import FAISS
-            
+
             if self.embedding_manager.use_openai:
                 # 使用 OpenAI Embedding
                 from langchain_openai import OpenAIEmbeddings
@@ -289,9 +286,9 @@ class VectorStoreManager:
             else:
                 # 检查是否有本地模型
                 local_path = self.embedding_manager._get_local_model_path(self.embedding_manager.model_name)
-                
+
                 from langchain_community.embeddings import HuggingFaceEmbeddings
-                
+
                 if local_path:
                     logger.info(f"使用本地模型路径: {local_path}")
                     # 使用绝对路径并确保路径格式正确
@@ -309,39 +306,48 @@ class VectorStoreManager:
                         model_kwargs={'device': self.embedding_manager.device, 'trust_remote_code': True},
                         encode_kwargs={'normalize_embeddings': self.embedding_manager.normalize_embeddings}
                     )
-            
+
             vector_store = FAISS.from_documents(documents, embeddings)
-            
+
             # 保存到本地
-            # 直接使用 FAISS API 保存索引，避免 langchain 的路径转换问题
-            # 确保使用相对路径以避免 FAISS 的 Unicode 路径问题
+            # FAISS C++ API 不支持 Unicode 路径，必须用 ASCII 相对路径
+            import pickle
             save_dir = Path(actual_save_path)
             if not save_dir.exists():
                 save_dir.mkdir(parents=True, exist_ok=True)
-            
-            # 使用字符串操作构建相对路径，避免 Path 对象的绝对路径转换
-            faiss_index_path_rel = actual_save_path + os.sep + "index.faiss"
-            faiss.write_index(vector_store.index, faiss_index_path_rel)
-            logger.info(f"FAISS 索引已保存到: {faiss_index_path_rel}")
-            
-            # 保存 docstore
-            import pickle
-            docstore_path = save_dir / "index.pkl"
-            with open(docstore_path, 'wb') as f:
-                pickle.dump({
-                    'docstore': vector_store.docstore,
-                    'index_to_docstore_id': vector_store.index_to_docstore_id
-                }, f)
-            logger.info(f"文档存储已保存到: {docstore_path}")
-            
-            logger.info(f"向量数据库已保存到: {actual_save_path}")
-            
+
+            # 优先用相对路径（纯 ASCII），避开中文路径问题
+            project_root = Path(__file__).parent.parent
+            try:
+                abs_path = Path(actual_save_path).resolve()
+                save_dir_abs = str(abs_path)
+                # 如果绝对路径含非 ASCII，用相对路径
+                if not save_dir_abs.isascii():
+                    try:
+                        save_dir_abs = str(abs_path.relative_to(project_root))
+                    except ValueError:
+                        save_dir_abs = str(save_dir)
+            except Exception:
+                save_dir_abs = str(save_dir)
+
+            logger.info(f"FAISS save path: {save_dir_abs}")
+
+            # LangChain 的 save_local 会同时写 index.faiss + index.pkl（docstore）
+            vector_store.save_local(save_dir_abs)
+
+            # 额外存 documents（Python pickle 支持中文路径，直接用原目录）
+            docs_path = save_dir / "documents.pkl"
+            with open(docs_path, 'wb') as f:
+                pickle.dump(documents, f)
+            logger.info(f"Documents 已保存到: {docs_path}")
+
             self._vector_store = vector_store
+            self._cached_documents = documents
             return vector_store
-            
+
         elif self.vector_store_type == "chroma":
             from langchain_community.vectorstores import Chroma
-            
+
             if self.embedding_manager.use_openai:
                 from langchain_openai import OpenAIEmbeddings
                 embeddings = OpenAIEmbeddings(
@@ -351,9 +357,9 @@ class VectorStoreManager:
             else:
                 # 检查是否有本地模型
                 local_path = self.embedding_manager._get_local_model_path(self.embedding_manager.model_name)
-                
+
                 from langchain_community.embeddings import HuggingFaceEmbeddings
-                
+
                 if local_path:
                     logger.info(f"使用本地模型路径: {local_path}")
                     # 使用绝对路径并确保路径格式正确
@@ -371,18 +377,18 @@ class VectorStoreManager:
                         model_kwargs={'device': self.embedding_manager.device, 'trust_remote_code': True},
                         encode_kwargs={'normalize_embeddings': self.embedding_manager.normalize_embeddings}
                     )
-            
+
             vector_store = Chroma.from_documents(
                 documents,
                 embeddings,
                 persist_directory=save_path or self.persist_directory
             )
-            
+
             self._vector_store = vector_store
             return vector_store
         else:
             raise ValueError(f"不支持的向量数据库类型: {self.vector_store_type}")
-    
+
     def load_vector_store(self, load_path: str) -> Any:
         """
         从本地加载向量数据库
@@ -394,10 +400,10 @@ class VectorStoreManager:
             向量数据库实例
         """
         logger.info(f"正在加载向量数据库: {load_path}")
-        
+
         # 设置 HuggingFace 镜像源
         os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
-        
+
         if self.embedding_manager.use_openai:
             from langchain_openai import OpenAIEmbeddings
             embeddings = OpenAIEmbeddings(
@@ -411,14 +417,46 @@ class VectorStoreManager:
                 model_kwargs={'device': self.embedding_manager.device, 'trust_remote_code': True},
                 encode_kwargs={'normalize_embeddings': self.embedding_manager.normalize_embeddings}
             )
-        
+
         if self.vector_store_type == "faiss":
+            import pickle
+
             from langchain_community.vectorstores import FAISS
+
+            load_dir = Path(load_path)
+
+            # FAISS C++ API 不支持 Unicode 路径
+            # 优先用相对路径（如果 ASCII），fallback 绝对路径
+            project_root = Path(__file__).parent.parent
+            try:
+                abs_path = Path(load_path).resolve()
+                load_dir_faiss = str(abs_path)
+                if not load_dir_faiss.isascii():
+                    try:
+                        load_dir_faiss = str(abs_path.relative_to(project_root))
+                    except ValueError:
+                        load_dir_faiss = str(load_dir)
+            except Exception:
+                load_dir_faiss = str(load_dir)
+
+            logger.info(f"FAISS load path: {load_dir_faiss}")
+
             vector_store = FAISS.load_local(
-                load_path,
+                load_dir_faiss,
                 embeddings,
                 allow_dangerous_deserialization=True
             )
+            logger.info(f"FAISS 索引从 {load_dir_faiss} 加载成功")
+
+            # 同时恢复 documents（Python pickle 支持中文路径）
+            docs_path = load_dir / "documents.pkl"
+            if docs_path.exists():
+                with open(docs_path, 'rb') as f:
+                    self._cached_documents = pickle.load(f)
+                logger.info(f"Documents 从 {docs_path} 恢复成功，共 {len(self._cached_documents)} 个")
+            else:
+                self._cached_documents = []
+                logger.warning("未找到 documents.pkl，session 恢复将为空")
         elif self.vector_store_type == "chroma":
             from langchain_community.vectorstores import Chroma
             vector_store = Chroma(
@@ -427,16 +465,16 @@ class VectorStoreManager:
             )
         else:
             raise ValueError(f"不支持的向量数据库类型: {self.vector_store_type}")
-        
+
         self._vector_store = vector_store
         logger.info("向量数据库加载完成")
         return vector_store
-    
+
     def similarity_search(
         self,
         query: str,
         k: int = 5,
-        filter_dict: Optional[Dict] = None
+        filter_dict: Dict | None = None
     ) -> List[Document]:
         """
         相似度搜索
@@ -451,7 +489,7 @@ class VectorStoreManager:
         """
         if self._vector_store is None:
             raise ValueError("向量数据库未初始化，请先创建或加载向量数据库")
-        
+
         results = self._vector_store.similarity_search(
             query,
             k=k,

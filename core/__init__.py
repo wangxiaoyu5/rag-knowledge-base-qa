@@ -1,22 +1,13 @@
-# -*- coding: utf-8 -*-
 """
 RAG 知识库问答系统 - 核心模块
 """
 
-from .document_loader import (
-    DocumentLoaderFactory,
-    load_document,
-    load_documents_from_directory
-)
-from .text_splitter import TextSplitter, create_splitter, get_chunk_strategy
+from .document_loader import DocumentLoaderFactory, load_document, load_documents_from_directory
 from .embedding import EmbeddingManager, VectorStoreManager, get_recommended_models
-from .retriever import (
-    HybridRetriever,
-    Reranker,
-    AdvancedRetriever,
-    RetrievalResult
-)
-from .qa_generator import QAGenerator, ContextCompressor, QAResponse
+from .qa_generator import ContextCompressor, QAGenerator, QAResponse
+from .query_transformer import QueryTransformer
+from .retriever import AdvancedRetriever, HybridRetriever, Reranker, RetrievalResult
+from .text_splitter import SmartTextSplitter, TextSplitter, create_splitter, get_chunk_strategy
 
 __all__ = [
     # Document Loader
@@ -25,6 +16,7 @@ __all__ = [
     "load_documents_from_directory",
     # Text Splitter
     "TextSplitter",
+    "SmartTextSplitter",
     "create_splitter",
     "get_chunk_strategy",
     # Embedding
@@ -36,6 +28,8 @@ __all__ = [
     "Reranker",
     "AdvancedRetriever",
     "RetrievalResult",
+    # Query Transformer
+    "QueryTransformer",
     # QA Generator
     "QAGenerator",
     "ContextCompressor",
